@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+
+#### INITIAL DRAFT
+
+import streamlit as st
+from langchain_ollama.llms import OllamaLLM
+from langchain_ollama import OllamaEmbeddings
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.vectorstores import InMemoryVectorStore
+from langchain_community.document_loaders import SeleniumURLLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+# from langchain import LLMChain
+
+template = """
+You are an assistant for question-answering tasks. 
+Use the following pieces of retrieved context to answer the question. 
+If you don't know the answer, just say that you don't know.
+Question: {question} 
+Context: {context} 
+Answer:
+"""
+
+embeddings = OllamaEmbeddings(model="llama3.2")
+vector_store = InMemoryVectorStore(embeddings)
+model = OllamaLLM(model="llama3.2")
+
+def load_page(url):
+    loader = SeleniumURLLoader(urls=[url])
+    return loader.load()
+
+def split_text(documents):
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        add_start_index=True
+    )
+    return text_splitter.split_documents(documents)
+
+def index_docs(documents):
+    vector_store.add_documents(documents)
+
+def retrieve_docs(query):
+    return vector_store.similarity_search(query)
+
+def answer_question(question, context):
+    prompt = ChatPromptTemplate.from_template(template)
+    chain = prompt | model
+    return chain.invoke({"question": question, "context": context})
+
+st.title("Web Crawler Chatbot")
+if "urls" not in st.session_state:
+    st.session_state.urls = []
+if "indexed" not in st.session_state:
+    st.session_state.indexed = False
+
+# url_input = st.text_input("Enter URL:", key="new_url_input")
+# if url_input and url_input not in st.session_state.urls:
+#     st.session_state.urls.append(url_input)
+
+if len(st.session_state.urls) < 5 and not st.session_state.indexed:
+    new_url = st.text_input("Enter URL (max 5):", key="new_url_input")
+    if st.button("Add URL"):
+        if new_url and new_url.strip():
+            st.session_state.urls.append(new_url.strip())
+
+if st.session_state.urls:
+    st.subheader("Sites Added:")
+    for idx, url in enumerate(st.session_state.urls, start=1):
+        st.write(f"{idx}. [{url}]({url})")
+
+if st.session_state.urls and not st.session_state.indexed:
+    if st.button("Finalize Sites"):
+        with st.spinner("Brewing up embeddings from your chosen sites..."):
+            for url in st.session_state.urls:
+                st.write(f"Processing {url}...")
+                docs = load_page(url)
+                chunks = split_text(docs)
+                index_docs(chunks)
+        st.session_state.indexed = True
+
+if st.session_state.indexed:
+    st.success("All sites processed and indexed! Scroll down to chat.")
+    st.subheader("Ask a Question")
+    question = st.chat_input("Type your question here...")  
+    if question:
+        st.chat_message("user").write(question)
+        retrieve_documents = retrieve_docs(question)
+        context = "\n\n".join([doc.page_content for doc in retrieve_documents])
+        answer = answer_question(question, context)
+        st.chat_message("assistant").write(answer)
+
+        sources_list = []
+        for doc in retrieve_documents:
+            source = doc.metadata.get("source", "title")
+            sources_list.append(f"- {source}")
+        if sources_list:
+            st.markdown("**Information retrieved from:**")
+            st.markdown("\n".join(sources_list))
+else:
+    if not st.session_state.urls:
+        st.info("Add a URL and then finalize them to unlock the magic of chat!")
+    else:
+        st.warning("Your sites are waiting to be indexed. Click 'Finalize Sites' above to continue!")
