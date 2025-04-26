@@ -1,4 +1,4 @@
-# Web Crawler Chatbot
+# RAG Web-Scraper Chatbot
 
 A powerful web crawler chatbot that processes URLs, extracts content, and answers questions based on the indexed information using LLM technology.
 
